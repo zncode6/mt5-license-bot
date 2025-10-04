@@ -61,6 +61,10 @@ def deactivate_license(mt5_account):
 
 init_db()  # Initialize DB
 
+@app.route('/')
+def home():
+    return '<h2>MT5 License Bot Server is running.</h2><p>Use /verify for license API.</p>'
+
 # Flask endpoint for EA license verification (called by MQL5 WebRequest)
 @app.route('/verify', methods=['GET'])
 def verify_license():
