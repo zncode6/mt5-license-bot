@@ -9,6 +9,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 
+
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # Load environment variables from .env
 load_dotenv()
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
@@ -83,9 +91,11 @@ def verify_license():
 
 # Telegram bot handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /start from user {update.effective_user.id}")
     await update.message.reply_text('Welcome! Use /register <MT5_account_number> to get a license key.\n/check <MT5_account_number> to view status.\n/deactivate <MT5_account_number> to revoke.')
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /register from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide your MT5 account number, e.g., /register 12345678')
         return
@@ -95,6 +105,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f'License generated for MT5 account {mt5_account}: {key}\nValid for 30 days. Input this key in your EA settings.')
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /check from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide MT5 account number, e.g., /check 12345678')
         return
@@ -103,6 +114,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status)
 
 async def deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /deactivate from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide MT5 account number, e.g., /deactivate 12345678')
         return
@@ -111,10 +123,12 @@ async def deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received message from user {update.effective_user.id}: {update.message.text}")
     await update.message.reply_text('Use /register, /check, or /deactivate with MT5 account number.')
 
 # Admin command example: list all licenses
 async def list_licenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Received /list from user {update.effective_user.id}")
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text('Not authorized.')
         return
@@ -129,8 +143,9 @@ async def list_licenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Run Telegram bot in a separate thread
 def run_bot():
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN not set in environment.")
+        logger.error("Error: BOT_TOKEN not set in environment.")
         return
+    logger.info("Starting Telegram bot...")
     app_bot = Application.builder().token(BOT_TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("register", register))
@@ -138,9 +153,11 @@ def run_bot():
     app_bot.add_handler(CommandHandler("deactivate", deactivate))
     app_bot.add_handler(CommandHandler("list", list_licenses))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    logger.info("Bot handlers added. Running polling...")
     app_bot.run_polling()
 
 if __name__ == '__main__':
+    logger.info("Starting bot thread and Flask server...")
     # Start Telegram bot in thread
     bot_thread = Thread(target=run_bot)
     bot_thread.start()
