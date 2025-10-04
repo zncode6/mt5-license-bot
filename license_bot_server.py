@@ -1,31 +1,19 @@
-import os
-from dotenv import load_dotenv
 import logging
+import os
 import sqlite3
 from datetime import datetime, timedelta
-from threading import Thread
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-
-
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Enable logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env
-load_dotenv()
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
-ADMIN_USER_ID = int(os.environ.get('ADMIN_USER_ID', '0'))
-
-# Flask app for the web server (for EA verification)
+# Flask app
 app = Flask(__name__)
 
-# Database functions (updated to include mt5_account)
+# Database functions (same as before)
 def init_db():
     conn = sqlite3.connect('licenses.db')
     c = conn.cursor()
@@ -67,20 +55,22 @@ def deactivate_license(mt5_account):
     conn.close()
     return "License deactivated."
 
-init_db()  # Initialize DB
+init_db()
 
-# Flask endpoint for EA license verification (called by MQL5 WebRequest)
+# Flask endpoint for EA license verification (unchanged)
 @app.route('/verify', methods=['GET'])
 def verify_license():
     mt5_account = request.args.get('mt5_account')
     license_key = request.args.get('license_key')
     if not mt5_account or not license_key:
         return "invalid", 400
+
     conn = sqlite3.connect('licenses.db')
     c = conn.cursor()
     c.execute("SELECT expiration, status FROM licenses WHERE mt5_account = ? AND license_key = ?", (mt5_account, license_key))
     result = c.fetchone()
     conn.close()
+
     if result:
         exp, status = result
         if status == 'active' and datetime.strptime(exp, '%Y-%m-%d') > datetime.now():
@@ -89,13 +79,11 @@ def verify_license():
             return "invalid", 403
     return "invalid", 404
 
-# Telegram bot handlers
+# Telegram bot handlers (unchanged)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /start from user {update.effective_user.id}")
     await update.message.reply_text('Welcome! Use /register <MT5_account_number> to get a license key.\n/check <MT5_account_number> to view status.\n/deactivate <MT5_account_number> to revoke.')
 
 async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /register from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide your MT5 account number, e.g., /register 12345678')
         return
@@ -105,7 +93,6 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f'License generated for MT5 account {mt5_account}: {key}\nValid for 30 days. Input this key in your EA settings.')
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /check from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide MT5 account number, e.g., /check 12345678')
         return
@@ -114,7 +101,6 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status)
 
 async def deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /deactivate from user {update.effective_user.id} with args: {context.args}")
     if not context.args:
         await update.message.reply_text('Please provide MT5 account number, e.g., /deactivate 12345678')
         return
@@ -123,43 +109,45 @@ async def deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(result)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received message from user {update.effective_user.id}: {update.message.text}")
     await update.message.reply_text('Use /register, /check, or /deactivate with MT5 account number.')
 
-# Admin command example: list all licenses
-async def list_licenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Received /list from user {update.effective_user.id}")
-    if update.effective_user.id != ADMIN_USER_ID:
-        await update.message.reply_text('Not authorized.')
-        return
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('SELECT mt5_account, license_key, expiration, status FROM licenses')
-    rows = c.fetchall()
-    conn.close()
-    msg = '\n'.join([f'{r[0]}: {r[1]}, {r[2]}, {r[3]}' for r in rows]) or 'No licenses.'
-    await update.message.reply_text(msg)
+# Webhook endpoint for Telegram updates
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_json()
+        update = Update.de_json(json_string, app_bot.bot)
+        app_bot.process_update(update)
+        return 'ok'
+    else:
+        abort(403)
 
-# Run Telegram bot in a separate thread
-def run_bot():
-    if not BOT_TOKEN:
-        logger.error("Error: BOT_TOKEN not set in environment.")
-        return
-    logger.info("Starting Telegram bot...")
-    app_bot = Application.builder().token(BOT_TOKEN).build()
+# Main: Set up and run
+if __name__ == '__main__':
+    TOKEN = os.environ.get('TOKEN')  # Set this as environment variable on Render
+    if not TOKEN:
+        raise ValueError("Missing TOKEN environment variable")
+
+    # Get Render's external URL
+    EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://your-app-name.onrender.com')  # Render sets this automatically
+    WEBHOOK_URL = f"{EXTERNAL_URL}/webhook"
+
+    # Build the application
+    app_bot = Application.builder().token(TOKEN).build()
+
+    # Add handlers
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("register", register))
     app_bot.add_handler(CommandHandler("check", check))
     app_bot.add_handler(CommandHandler("deactivate", deactivate))
-    app_bot.add_handler(CommandHandler("list", list_licenses))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("Bot handlers added. Running polling...")
-    app_bot.run_polling()
 
-if __name__ == '__main__':
-    logger.info("Starting bot thread and Flask server...")
-    # Start Telegram bot in thread
-    bot_thread = Thread(target=run_bot)
-    bot_thread.start()
-    # Run Flask server
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Set webhook (delete any old one first)
+    app_bot.bot.delete_webhook(drop_pending_updates=True)
+    app_bot.bot.set_webhook(url=WEBHOOK_URL)
+
+    logger.info(f"Webhook set to {WEBHOOK_URL}")
+
+    # Bind to PORT for Render
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
