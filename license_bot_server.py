@@ -61,10 +61,6 @@ def deactivate_license(mt5_account):
 
 init_db()  # Initialize DB
 
-@app.route('/')
-def home():
-    return '<h2>MT5 License Bot Server is running.</h2><p>Use /verify for license API.</p>'
-
 # Flask endpoint for EA license verification (called by MQL5 WebRequest)
 @app.route('/verify', methods=['GET'])
 def verify_license():
@@ -130,6 +126,23 @@ async def list_licenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = '\n'.join([f'{r[0]}: {r[1]}, {r[2]}, {r[3]}' for r in rows]) or 'No licenses.'
     await update.message.reply_text(msg)
 
+# Run Telegram bot in a separate thread
+def run_bot():
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN not set in environment.")
+        return
+    app_bot = Application.builder().token(BOT_TOKEN).build()
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("register", register))
+    app_bot.add_handler(CommandHandler("check", check))
+    app_bot.add_handler(CommandHandler("deactivate", deactivate))
+    app_bot.add_handler(CommandHandler("list", list_licenses))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app_bot.run_polling()
 
 if __name__ == '__main__':
+    # Start Telegram bot in thread
+    bot_thread = Thread(target=run_bot)
+    bot_thread.start()
+    # Run Flask server
     app.run(host='0.0.0.0', port=5000, debug=True)
